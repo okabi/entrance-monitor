@@ -8,45 +8,44 @@ DIR = "jpg/"
 THRESHOLD = 5
 BLUR = 7
 
+def datetime_now():
+    return datetime.now().strftime("%Y%m%d%H%M%S")
+
 def monitor(uri):
-    stream = urllib.urlopen(uri) # Stream from MJPG-Streamer
-    data = ''                    # Byte data got from `stream`
-    filename = [
-        datetime.now().strftime("%Y%m%d%H%M%S"),
-        0]
-    imgs = [None, None, None]
+    stream = urllib.urlopen(uri)  # Stream from MJPG-Streamer
+    filename = [datetime_now(), 0]# output JPG filename
+    img_array = [None] * 3        # image history (recent 3)
+    data = ''                     # Byte data got from `stream`
     while True:
         data += stream.read(1024)
-        start = data.find('\xff\xd8') # JPG Start
-        end = data.find('\xff\xd9')   # JPG End
-        if start != -1 and end != -1:
-            end += 2
-            jpg = data[start:end]
-            data = data[end:]
-            img = cv2.imdecode(
-                np.fromstring(jpg, dtype=np.uint8),
-                cv2.CV_LOAD_IMAGE_COLOR)
-            for i, value in enumerate(imgs):
-                if value == None:
-                    imgs[i] = img
-                elif i == len(imgs) - 1:
-                    imgs = imgs[1:] + imgs[:1]
-                    imgs[len(imgs) - 1] = img
-                    v, diff = checkDiff(
-                        imgs[0], imgs[1], imgs[2])
-                    if diff:
-                        cv2.imwrite(
-                            DIR + filename[0] + "-" + str(filename[1]) + "-" + str(v) + ".jpg",
-                            imgs[1])
-            now = datetime.now().strftime("%Y%m%d%H%M%S")
-            if filename[0] == now:
-                filename[1] += 1
-            else:
-                filename[0] = now
-                filename[1] = 0
+        start = data.find('\xff\xd8')     # JPG Start
+        end = data.find('\xff\xd9') + 2   # JPG End
+        if start == -1 or end == 1:
+            continue
+        img = cv2.imdecode(
+            np.fromstring(
+                data[start:end], dtype=np.uint8),
+            cv2.CV_LOAD_IMAGE_COLOR)
+        data = data[end:]
+        img_array = img_array[1:] + img_array[:1]
+        img_array[len(img_array) - 1] = img
+        if img_array[0] == None:
+            continue
+        diff, should_save = check_diff(
+            img_array[0], img_array[1], img_array[2])
+        if should_save:
+            cv2.imwrite(
+                "{0}{1}-{2}-{3:.3f}.jpg".format(
+                    DIR, filename[0], filename[1], diff),
+                img_array[1])
+            filename[1] += 1
+        now = datetime_now()
+        if filename[0] != now:
+            filename[0] = now
+            filename[1] = 0
 
 # ref. https://github.com/tanaka0079/python/blob/python/opencv/flame_sub.py
-def checkDiff(img1, img2, img3):
+def check_diff(img1, img2, img3):
     diff = cv2.bitwise_and(
         cv2.absdiff(img1, img2),
         cv2.absdiff(img2, img3))
@@ -62,6 +61,7 @@ def checkDiff(img1, img2, img3):
         np.uint8)
     result[:][:] = 255
     result[mask] = 0
+    reslut = cv2.medianBlur(result, BLUR)
     hist = np.histogram(result, 2, range = (0, 255))
     value = float(hist[0][0]) / sum(hist[0])
     if value < 0.99:
